@@ -35,7 +35,10 @@ export class ATTProvider {
     const isLoggedIn = await this.checkSession();
     
     if (!isLoggedIn) {
+      console.log('Logging into AT&T...');
       await this.login();
+    } else {
+      console.log('Using existing AT&T session...');
     }
 
     // Fetch both accounts
@@ -50,14 +53,19 @@ export class ATTProvider {
   private async checkSession(): Promise<boolean> {
     const { execSync } = await import('child_process');
     try {
-      // Try to navigate to the dashboard and check for logged-in state
-      const result = execSync(
-        `agent-browser --session ${this.sessionName} open https://www.att.com/myatt && agent-browser --session ${this.sessionName} get url`,
+      // Check current URL - if on myatt without login redirect, we're good
+      const url = execSync(
+        `agent-browser --session ${this.sessionName} get url`,
         { encoding: 'utf-8', timeout: 10000 }
-      );
+      ).trim();
       
-      // If we're on the dashboard (not login page), we're logged in
-      return result.includes('myatt') && !result.includes('login');
+      // Check if we see account cards (logged in state)
+      const count = execSync(
+        `agent-browser --session ${this.sessionName} get count "[data-testid*='Wireless']"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      ).trim();
+      
+      return parseInt(count) > 0;
     } catch {
       return false;
     }
@@ -68,58 +76,63 @@ export class ATTProvider {
     const username = process.env.ATT_USER || '';
     const password = process.env.ATT_PASS || '';
 
-    const cmds = [
-      `agent-browser --session ${this.sessionName} open https://www.att.com/myatt`,
-      `agent-browser --session ${this.sessionName} wait --load networkidle`,
-      // Look for username field
-      `agent-browser --session ${this.sessionName} find label "User ID" fill "${username}"`,
-      `agent-browser --session ${this.sessionName} find label "Password" fill "${password}"`,
-      `agent-browser --session ${this.sessionName} find label "Sign In" click`,
-      `agent-browser --session ${this.sessionName} wait --load networkidle`,
-      `agent-browser --session ${this.sessionName} wait 2000`,
-    ];
-
-    for (const cmd of cmds) {
-      try {
-        execSync(cmd, { encoding: 'utf-8', timeout: 30000 });
-      } catch (error) {
-        console.log(`Command failed, continuing: ${cmd}`);
-      }
+    // Close any existing session first to start fresh
+    try {
+      execSync(`agent-browser --session ${this.sessionName} close`, { encoding: 'utf-8', timeout: 5000 });
+    } catch {
+      // Ignore
     }
 
-    // Save session state
-    execSync(`agent-browser --session ${this.sessionName} cookies`, { encoding: 'utf-8' });
+    const steps = [
+      `agent-browser --session ${this.sessionName} open https://www.att.com/myatt`,
+      `agent-browser --session ${this.sessionName} wait --load networkidle`,
+      // Wait for login form
+      `agent-browser --session ${this.sessionName} wait 2000`,
+      // Fill username - try multiple selectors
+      `agent-browser --session ${this.sessionName} find label "User ID" fill "${username}"`,
+      // Fill password
+      `agent-browser --session ${this.sessionName} find label "Password" fill "${password}"`,
+      // Click sign in
+      `agent-browser --session ${this.sessionName} find text "Sign In" click`,
+      // Wait for dashboard
+      `agent-browser --session ${this.sessionName} wait --load networkidle`,
+      `agent-browser --session ${this.sessionName} wait 3000`,
+    ];
+
+    for (const cmd of steps) {
+      try {
+        execSync(cmd, { encoding: 'utf-8', timeout: 30000 });
+      } catch (error: any) {
+        console.log(`Step: ${cmd.split(' ').slice(2).join(' ')} - continuing...`);
+      }
+    }
   }
 
   private async fetchAccount(type: 'wireless' | 'internet', last4: string, testid: string): Promise<Bill | null> {
     const { execSync } = await import('child_process');
 
     try {
+      console.log(`Fetching AT&T ${type} (****${last4})...`);
+
       // Click on the account to switch to it
       execSync(
         `agent-browser --session ${this.sessionName} find testid "${testid}" click`,
         { encoding: 'utf-8', timeout: 15000 }
       );
 
-      // Wait for the account content to load
-      execSync(`agent-browser --session ${this.sessionName} wait 1500`, { encoding: 'utf-8' });
+      // Wait for account content to load
+      execSync(`agent-browser --session ${this.sessionName} wait 2000`, { encoding: 'utf-8' });
 
-      // Get balance - look for amount elements
-      const balanceResult = execSync(
-        `agent-browser --session ${this.sessionName} snapshot --json`,
-        { encoding: 'utf-8', timeout: 15000 }
-      );
-
-      // Parse balance from snapshot
-      const balance = this.extractBalance(balanceResult);
-
+      // Get the balance using specific selectors from the HTML
+      const balance = await this.extractBalance();
+      
       // Get due date
-      const dueDateResult = execSync(
-        `agent-browser --session ${this.sessionName} find text "Due" text`,
-        { encoding: 'utf-8', timeout: 10000 }
-      );
+      const dueDate = await this.extractDueDate();
+      
+      // Get additional info if available
+      const minDue = await this.extractMinDue();
 
-      const dueDate = this.parseDueDate(dueDateResult);
+      console.log(`  → Balance: $${balance.toFixed(2)}, Due: ${dueDate.toLocaleDateString()}`);
 
       return {
         provider: `AT&T ${type.charAt(0).toUpperCase() + type.slice(1)}`,
@@ -130,42 +143,94 @@ export class ATTProvider {
         status: this.calculateStatus(dueDate),
         lastUpdated: new Date(),
         accountLast4: last4,
+        payUrl: 'https://www.att.com/myatt/billing',
       };
     } catch (error) {
-      console.error(`Failed to fetch AT&T ${type} bill:`, error);
+      console.error(`Failed to fetch AT&T ${type}:`, error);
       return null;
     }
   }
 
-  private extractBalance(snapshotJson: string): number {
-    try {
-      const snapshot = JSON.parse(snapshotJson);
-      // Look for elements containing currency patterns
-      const text = JSON.stringify(snapshot);
-      const matches = text.match(/\$[\d,]+\.?\d{0,2}/g);
-      if (matches && matches.length > 0) {
-        const cleaned = matches[0].replace(/[$,]/g, '');
-        return parseFloat(cleaned) || 0;
-      }
-    } catch {
-      // Fallback parsing
-    }
-    return 0;
+  private async extractBalance(): Promise<number> {
+    const { execSync } = await import('child_process');
+    
+    // Get the balance from the price section - look for type-60 class with dollar sign
+    const balanceText = execSync(
+      `agent-browser --session ${this.sessionName} eval "document.querySelector('.type-60')?.textContent?.replace(/[^0-9.]/g, '') || '0'"`,
+      { encoding: 'utf-8', timeout: 10000 }
+    ).trim();
+
+    const balance = parseFloat(balanceText);
+    return isNaN(balance) ? 0 : balance;
   }
 
-  private parseDueDate(text: string): Date {
-    // Try to parse common date formats
-    const now = new Date();
+  private async extractDueDate(): Promise<Date> {
+    const { execSync } = await import('child_process');
     
-    // Look for "Due [date]" pattern
-    const dueMatch = text.match(/Due[:\s]+(.+)/i);
-    if (dueMatch) {
-      const parsed = new Date(dueMatch[1]);
-      if (!isNaN(parsed.getTime())) return parsed;
+    // Look for due date in various places
+    const dueDateSelectors = [
+      '[class*="due"]',
+      '[id*="due"]',
+      '[data-testid*="due"]',
+      '.type-15',
+    ];
+
+    for (const selector of dueDateSelectors) {
+      try {
+        const text = execSync(
+          `agent-browser --session ${this.sessionName} eval "document.querySelector('${selector}')?.textContent || ''"`,
+          { encoding: 'utf-8', timeout: 5000 }
+        ).trim();
+        
+        if (text && !text.includes('undefined')) {
+          const parsed = new Date(text);
+          if (!isNaN(parsed.getTime())) return parsed;
+        }
+      } catch {
+        continue;
+      }
     }
 
-    // Fallback: assume same day or next billing cycle
-    return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    // Fallback: look for any date-like text on the page
+    try {
+      const pageText = execSync(
+        `agent-browser --session ${this.sessionName} eval "document.body.innerText"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      
+      // Look for "Due" followed by a date
+      const dueMatch = pageText.match(/Due[:\s]+([A-Za-z0-9,\s\/]+)/i);
+      if (dueMatch) {
+        const parsed = new Date(dueMatch[1]);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+    } catch {
+      // Fall through
+    }
+
+    // Default: 30 days from now
+    return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  }
+
+  private async extractMinDue(): Promise<number> {
+    const { execSync } = await import('child_process');
+    
+    try {
+      const text = execSync(
+        `agent-browser --session ${this.sessionName} eval "document.body.innerText"`,
+        { encoding: 'utf-8', timeout: 5000 }
+      );
+      
+      // Look for "Minimum due" or similar
+      const minMatch = text.match(/Minimum[:\s]*\$?([\d,]+\.?\d{0,2})/i);
+      if (minMatch) {
+        return parseFloat(minMatch[1].replace(/,/g, ''));
+      }
+    } catch {
+      // Ignore
+    }
+    
+    return 0;
   }
 
   private calculateStatus(dueDate: Date): Bill['status'] {
@@ -182,9 +247,9 @@ export class ATTProvider {
     // Keep session open for reuse, but can close explicitly if needed
     const { execSync } = await import('child_process');
     try {
-      execSync(`agent-browser --session ${this.sessionName} close`, { encoding: 'utf-8' });
+      execSync(`agent-browser --session ${this.sessionName} close`, { encoding: 'utf-8', timeout: 5000 });
     } catch {
-      // Ignore close errors
+      // Ignore
     }
   }
 }
