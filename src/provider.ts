@@ -5,14 +5,6 @@
  * Providers can use different access methods: API, OAuth, Scrape, or Browser.
  */
 
-export interface Provider {
-  name: string;
-  category: 'utility' | 'bank' | 'credit' | 'insurance' | 'subscription' | 'other';
-  method: 'api' | 'oauth' | 'scrape' | 'browser';
-  config: ProviderConfig;
-  fetch(): Promise<Bill>;
-}
-
 export interface ProviderConfig {
   loginUrl?: string;
   apiBase?: string;
@@ -30,7 +22,7 @@ export interface ProviderConfig {
 
 export interface Bill {
   provider: string;
-  category: string;
+  category: 'utility' | 'bank' | 'credit' | 'insurance' | 'subscription' | 'other';
   amount: number;
   currency: string;
   dueDate: Date;
@@ -40,17 +32,27 @@ export interface Bill {
   accountLast4?: string;
 }
 
+export type ProviderCategory = Bill['category'];
+
+export interface Provider {
+  name: string;
+  category: ProviderCategory;
+  method: 'api' | 'oauth' | 'scrape' | 'browser';
+  config: ProviderConfig;
+  fetch(): Promise<Bill | Bill[]>;
+}
+
 /**
  * Provider Template (for contributors)
  * Copy this file to providers/ and customize
  */
 export abstract class BaseProvider implements Provider {
   abstract name: string;
-  abstract category: Provider['category'];
+  abstract category: ProviderCategory;
   abstract method: Provider['method'];
   abstract config: ProviderConfig;
 
-  abstract fetch(): Promise<Bill>;
+  abstract fetch(): Promise<Bill | Bill[]>;
 
   protected getEnv(varName: string): string {
     const value = process.env[varName];

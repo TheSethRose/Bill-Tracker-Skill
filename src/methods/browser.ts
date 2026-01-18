@@ -6,23 +6,27 @@
  */
 
 import { chromium, Browser, Page } from 'playwright';
-import { BaseProvider, Bill, ProviderConfig } from '../provider.js';
+import { BaseProvider, Bill, ProviderConfig, ProviderCategory } from '../provider.js';
 
 export class BrowserProvider extends BaseProvider {
-  private browser: Browser | null = null;
+  browser: Browser | null = null;
 
   constructor(
-    private providerName: string,
-    private category: Bill['category'],
-    private config: ProviderConfig
+    name: string,
+    category: ProviderCategory,
+    private providerConfig: ProviderConfig
   ) {
     super();
+    this.name = name;
+    this.category = category;
+    this.method = 'browser';
+    this.config = providerConfig;
   }
 
-  get name() { return this.providerName; }
-  get category() { return this.category; }
-  get method() { return 'browser' as const; }
-  get config() { return this.config; }
+  name: string;
+  category: ProviderCategory;
+  method: 'browser' = 'browser';
+  config: ProviderConfig;
 
   async fetch(): Promise<Bill> {
     this.browser = await chromium.launch({ headless: true });
@@ -35,30 +39,24 @@ export class BrowserProvider extends BaseProvider {
     }
   }
 
-  protected async login(page: Page): Promise<void> {
+  protected async login(_page: Page): Promise<void> {
     const username = this.getEnv(this.config.envVars[0]);
     const password = this.getEnv(this.config.envVars[1]);
 
-    await page.goto(this.config.loginUrl || '');
-    await page.fill('input[name="username"], input[name="email"]', username);
-    await page.fill('input[name="password"]', password);
-    await page.click('button[type="submit"]');
-    
-    // Wait for navigation after login
-    await page.waitForLoadState('networkidle');
+    throw new Error('Override login() in provider implementation');
   }
 
-  protected async extractBillData(page: Page): Promise<Bill> {
-    throw new Error('Not implemented - override in provider');
+  protected async extractBillData(_page: Page): Promise<Bill> {
+    throw new Error('Override extractBillData() in provider implementation');
   }
 
   protected async getBalance(page: Page): Promise<number> {
-    const balanceText = await page.locator('.balance, [data-testid="balance"]').textContent();
+    const balanceText = await page.locator('.balance, [data-testid="balance"]').first().textContent();
     return this.parseCurrency(balanceText || '0');
   }
 
   protected async getDueDate(page: Page): Promise<Date> {
-    const dueText = await page.locator('.due-date, [data-testid="due-date"]').textContent();
+    const dueText = await page.locator('.due-date, [data-testid="due-date"]').first().textContent();
     if (!dueText) throw new Error('Due date not found');
     return this.parseDate(dueText);
   }

@@ -7,9 +7,8 @@
  * @ clawd.bot - Thank you for making this possible!
  */
 
-import { Aggregator } from './aggregator.js';
+import { Aggregator, loadProviders } from './aggregator.js';
 import { UI } from './ui.js';
-import { loadProviders } from './provider.js';
 
 export async function main() {
   const providers = await loadProviders();

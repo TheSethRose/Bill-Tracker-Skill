@@ -4,9 +4,9 @@
  * Formats and displays bill data in a clean table format.
  */
 
-import { Bill } from './provider.js';
-import { format, isPast, isWithinInterval, addDays } from 'date-fns';
-import { table } from 'table';
+import { Bill, ProviderCategory } from './provider.js';
+import { format } from 'date-fns';
+import { table, TableUserConfig } from 'table';
 
 export class UI {
   constructor(private bills: Bill[]) {}
@@ -53,13 +53,12 @@ export class UI {
       bill.category,
     ]);
 
-    return table([header, ...rows], {
+    const config: TableUserConfig = {
       columnDefault: { alignment: 'left' },
-      header: { alignment: 'center' },
       columns: {
-        1: { alignment: 'right' },
-        2: { alignment: 'center' },
-        3: { alignment: 'center' },
+        1: { alignment: 'right' as const },
+        2: { alignment: 'center' as const },
+        3: { alignment: 'center' as const },
       },
       border: {
         topBody: '─',
@@ -74,7 +73,9 @@ export class UI {
         bodyRight: '│',
         bodyJoin: '│',
       },
-    });
+    };
+
+    return table([header, ...rows], config);
   }
 
   private formatCurrency(amount: number, currency: string): string {
@@ -109,4 +110,12 @@ export class UI {
     ).join('\n');
     return header + rows;
   }
+}
+
+export function groupByCategory(bills: Bill[]): Record<ProviderCategory, Bill[]> {
+  return bills.reduce((acc, bill) => {
+    if (!acc[bill.category]) acc[bill.category] = [];
+    acc[bill.category].push(bill);
+    return acc;
+  }, {} as Record<ProviderCategory, Bill[]>);
 }

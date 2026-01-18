@@ -5,7 +5,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import { BaseProvider, Bill, ProviderConfig } from '../provider.js';
+import { BaseProvider, Bill, ProviderConfig, ProviderCategory } from '../provider.js';
 
 export class OAuthProvider extends BaseProvider {
   private client: AxiosInstance;
@@ -13,21 +13,26 @@ export class OAuthProvider extends BaseProvider {
   private tokenExpiry: Date | null = null;
 
   constructor(
-    private providerName: string,
-    private category: Bill['category'],
-    private config: ProviderConfig
+    name: string,
+    category: ProviderCategory,
+    private providerConfig: ProviderConfig
   ) {
     super();
+    this.name = name;
+    this.category = category;
+    this.method = 'oauth';
+    this.config = providerConfig;
+    
     this.client = axios.create({
-      baseURL: config.apiBase,
+      baseURL: providerConfig.apiBase,
       timeout: 30000,
     });
   }
 
-  get name() { return this.providerName; }
-  get category() { return this.category; }
-  get method() { return 'oauth' as const; }
-  get config() { return this.config; }
+  name: string;
+  category: ProviderCategory;
+  method: 'oauth' = 'oauth';
+  config: ProviderConfig;
 
   async fetch(): Promise<Bill> {
     await this.ensureAuthenticated();
@@ -45,7 +50,6 @@ export class OAuthProvider extends BaseProvider {
     const clientId = this.getEnv(this.config.envVars[0]);
     const clientSecret = this.getEnv(this.config.envVars[1]);
 
-    // Implement OAuth flow (client credentials or authorization code)
     const response = await axios.post(`${this.config.apiBase}/oauth/token`, {
       grant_type: 'client_credentials',
       client_id: clientId,
@@ -59,7 +63,6 @@ export class OAuthProvider extends BaseProvider {
   }
 
   protected async fetchBillData(): Promise<Bill> {
-    // Override in provider implementation
     throw new Error('Not implemented');
   }
 
@@ -77,11 +80,11 @@ export class OAuthProvider extends BaseProvider {
     return this.parseDate(this.extractDueDate(response.data));
   }
 
-  protected extractBalance(data: unknown): number {
+  protected extractBalance(_data: unknown): number {
     throw new Error('Not implemented');
   }
 
-  protected extractDueDate(data: unknown): string | number | Date {
+  protected extractDueDate(_data: unknown): string | number | Date {
     throw new Error('Not implemented');
   }
 }

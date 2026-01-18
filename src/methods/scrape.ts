@@ -7,24 +7,28 @@
 
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import { BaseProvider, Bill, ProviderConfig } from '../provider.js';
+import { BaseProvider, Bill, ProviderConfig, ProviderCategory } from '../provider.js';
 
 export class ScrapeProvider extends BaseProvider {
   private baseUrl: string;
 
   constructor(
-    private providerName: string,
-    private category: Bill['category'],
-    private config: ProviderConfig
+    name: string,
+    category: ProviderCategory,
+    providerConfig: ProviderConfig
   ) {
     super();
-    this.baseUrl = config.loginUrl || '';
+    this.name = name;
+    this.category = category;
+    this.method = 'scrape';
+    this.config = providerConfig;
+    this.baseUrl = providerConfig.loginUrl || '';
   }
 
-  get name() { return this.providerName; }
-  get category() { return this.category; }
-  get method() { return 'scrape' as const; }
-  get config() { return this.config; }
+  name: string;
+  category: ProviderCategory;
+  method: 'scrape' = 'scrape';
+  config: ProviderConfig;
 
   async fetch(): Promise<Bill> {
     const cookie = await this.authenticate();
@@ -43,7 +47,6 @@ export class ScrapeProvider extends BaseProvider {
       withCredentials: true,
     });
 
-    // Extract session cookie
     const setCookie = response.headers['set-cookie'];
     return Array.isArray(setCookie) ? setCookie.join('; ') : setCookie || '';
   }
@@ -66,15 +69,15 @@ export class ScrapeProvider extends BaseProvider {
     };
   }
 
-  protected extractAmount($: cheerio.CheerioAPI): number {
+  protected extractAmount(_$: cheerio.CheerioAPI): number {
     throw new Error('Not implemented - override in provider');
   }
 
-  protected extractDueDate($: cheerio.CheerioAPI): Date {
+  protected extractDueDate(_$: cheerio.CheerioAPI): Date {
     throw new Error('Not implemented - override in provider');
   }
 
-  protected extractCurrency($: cheerio.CheerioAPI): string | null {
+  protected extractCurrency(_$: cheerio.CheerioAPI): string | null {
     return null;
   }
 

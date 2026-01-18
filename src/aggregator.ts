@@ -6,7 +6,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Bill, Provider, BaseProvider } from './provider.js';
+import { Bill, Provider, BaseProvider, ProviderCategory } from './provider.js';
 
 export class Aggregator {
   constructor(private providers: Provider[]) {}
@@ -15,21 +15,21 @@ export class Aggregator {
     const results = await Promise.allSettled(
       this.providers.map(async (provider) => {
         try {
-          return await provider.fetch();
+          const result = await provider.fetch();
+          return Array.isArray(result) ? result : [result];
         } catch (error) {
           console.error(`Failed to fetch from ${provider.name}:`, error);
-          return null;
+          return [];
         }
       })
     );
 
     return results
-      .filter((r): r is PromiseFulfilledResult<Bill> => r.status === 'fulfilled' && r.value !== null)
-      .map((r) => r.value)
+      .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
       .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
   }
 
-  async fetchByCategory(category: Provider['category']): Promise<Bill[]> {
+  async fetchByCategory(category: ProviderCategory): Promise<Bill[]> {
     const bills = await this.fetchAllBills();
     return bills.filter((b) => b.category === category);
   }
@@ -55,11 +55,11 @@ export async function loadProviders(): Promise<Provider[]> {
   const providers: Provider[] = [];
   
   try {
-    const providerDir = path.join(process.cwd(), 'providers');
+    const providerDir = path.join(process.cwd(), 'dist', 'providers');
     if (!fs.existsSync(providerDir)) return [];
 
     const files = fs.readdirSync(providerDir).filter(
-      (f) => f.endsWith('.ts') || (f.endsWith('.js') && !f.endsWith('.d.ts'))
+      (f) => f.endsWith('.js') && !f.endsWith('.d.ts') && !f.startsWith('_')
     );
 
     for (const file of files) {

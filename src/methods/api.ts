@@ -5,35 +5,39 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import { BaseProvider, Bill, ProviderConfig } from '../provider.js';
+import { BaseProvider, Bill, ProviderConfig, ProviderCategory } from '../provider.js';
 
 export class ApiProvider extends BaseProvider {
   private client: AxiosInstance;
   
   constructor(
-    private providerName: string,
-    private category: Bill['category'],
-    private config: ProviderConfig
+    name: string,
+    category: ProviderCategory,
+    private providerConfig: ProviderConfig
   ) {
     super();
+    this.name = name;
+    this.category = category;
+    this.method = 'api';
+    this.config = providerConfig;
+    
     this.client = axios.create({
-      baseURL: config.apiBase,
+      baseURL: providerConfig.apiBase,
       timeout: 30000,
-      headers: config.auth
+      headers: providerConfig.auth
         ? {
-            ...(config.auth.type === 'basic' && this.getBasicAuthHeader()),
+            ...(providerConfig.auth.type === 'basic' && this.getBasicAuthHeader()),
           }
         : {},
     });
   }
 
-  get name() { return this.providerName; }
-  get category() { return this.category; }
-  get method() { return 'api' as const; }
-  get config() { return this.config; }
+  name: string;
+  category: ProviderCategory;
+  method: 'api' = 'api';
+  config: ProviderConfig;
 
   async fetch(): Promise<Bill> {
-    // Implement provider-specific logic
     throw new Error('Not implemented');
   }
 
@@ -58,13 +62,11 @@ export class ApiProvider extends BaseProvider {
     return this.parseDate(this.extractDueDate(response.data));
   }
 
-  protected extractBalance(data: unknown): number {
-    // Override in provider implementation
+  protected extractBalance(_data: unknown): number {
     throw new Error('Not implemented');
   }
 
-  protected extractDueDate(data: unknown): string | number | Date {
-    // Override in provider implementation
+  protected extractDueDate(_data: unknown): string | number | Date {
     throw new Error('Not implemented');
   }
 }
