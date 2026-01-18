@@ -18,9 +18,12 @@ export class AtmosEnergyProvider {
   category: ProviderCategory = 'utility';
   method: 'browser' = 'browser';
   config: ProviderConfig = {
-    loginUrl: 'https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2',
+    loginUrl: 'https://www.atmosenergy.com/accountcenter/logon/login.html',
     envVars: ['ATMOS_EMAIL', 'ATMOS_PASS'],
   };
+
+  private loginUrl = 'https://www.atmosenergy.com/accountcenter/logon/login.html';
+  private dashboardUrl = 'https://www.atmosenergy.com/accountcenter/landing/landingScreen.html';
 
   private sessionName = 'atmos-energy-bill';
   private cookieDir = path.join(process.cwd(), 'sessions');
@@ -62,7 +65,7 @@ export class AtmosEnergyProvider {
         this.exec('close');
       } catch {}
 
-      this.exec('open https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2');
+      this.exec('open "https://www.atmosenergy.com/accountcenter/logon/login.html"');
       this.wait(3000);
 
       if (cookies.data && Array.isArray(cookies.data)) {
@@ -73,11 +76,11 @@ export class AtmosEnergyProvider {
         }
       }
 
-      this.exec('open https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2');
+      this.exec('open "https://www.atmosenergy.com/accountcenter/landing/landingScreen.html"');
       this.wait(3000);
 
       const url = this.exec('get url');
-      return url.includes('FinancialTransaction') || url.includes('accountcenter');
+      return url.includes('landing') || url.includes('accountcenter');
     } catch {
       return false;
     }
@@ -91,27 +94,44 @@ export class AtmosEnergyProvider {
       this.exec('close');
     } catch {}
 
-    this.exec('open "https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2"');
-    this.wait(3000);
+    // Go directly to login page
+    this.exec('open "https://www.atmosenergy.com/accountcenter/logon/login.html"');
+    this.wait(5000);  // Wait for page to load
 
-    // Click the Login link to show the login form
-    this.exec('click \'text="Login"\'');
-    this.wait(2000);
-
-    // Fill email
-    this.exec('fill "Username" "TheSethRose"');
-    this.wait(500);
+    // Fill form using JavaScript - check repeatedly for form elements
+    const escapedEmail = email.replace(/'/g, "\\'");
+    const escapedPassword = password.replace(/'/g, "\\'");
     
-    // Fill password
-    this.exec('fill "Password" "zx6CMnq.L"');
-    this.wait(500);
-    
-    // Click sign in
-    this.exec('click "Login"');
-    this.wait(5000);
+    // Simple approach - just wait for elements and fill
+    const jsCode = `
+      (function() {
+        var attempts = 0;
+        var maxAttempts = 15;
+        function tryFill() {
+          var user = document.querySelector('input[name=username]');
+          var pass = document.querySelector('input[name=password]');
+          if (user && pass) {
+            user.value = '${escapedEmail}';
+            pass.value = '${escapedPassword}';
+            pass.closest('form').submit();
+            return 'success';
+          }
+          if (attempts < maxAttempts) {
+            attempts++;
+            var start = Date.now();
+            while (Date.now() - start < 500) {}  // Wait 500ms
+            return tryFill();
+          }
+          return 'timeout';
+        }
+        return tryFill();
+      })()
+    `;
+    this.execEval(jsCode);
+    this.wait(8000);
 
-    // Navigate to billing
-    this.exec('open https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2');
+    // Navigate to dashboard
+    this.exec('open "https://www.atmosenergy.com/accountcenter/landing/landingScreen.html"');
     this.wait(3000);
 
     await this.saveSession();
@@ -203,7 +223,7 @@ export class AtmosEnergyProvider {
         status: this.calculateStatus(dueDate),
         lastUpdated: new Date(),
         accountLast4: data.account?.slice(-4) || undefined,
-        payUrl: 'https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2',
+        payUrl: 'https://www.atmosenergy.com/accountcenter/landing/landingScreen.html',
       };
     } catch (error) {
       console.error('Failed to fetch Atmos Energy bill:', error);
@@ -215,7 +235,7 @@ export class AtmosEnergyProvider {
         dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         status: 'pending',
         lastUpdated: new Date(),
-        payUrl: 'https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2',
+        payUrl: 'https://www.atmosenergy.com/accountcenter/landing/landingScreen.html',
       };
     }
   }
