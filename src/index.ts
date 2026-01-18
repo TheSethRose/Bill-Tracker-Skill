@@ -14,20 +14,33 @@ import { UI } from './ui.js';
 // Parse command line args
 const args = process.argv.slice(2);
 const providerArg = args.find(arg => arg.startsWith('--provider='));
-const specificProvider = providerArg ? providerArg.split('=')[1] : null;
+const forceArg = args.find(arg => arg === '--force');
 
-// Override BILL_PROVIDERS if --provider is specified
-if (specificProvider) {
-  process.env.BILL_PROVIDERS = specificProvider;
-  console.log(`\n🔧 Running single provider: ${specificProvider}\n`);
+// Set config from CLI args
+if (providerArg) {
+  const provider = providerArg.split('=')[1];
+  process.env.BILL_PROVIDERS = provider;
+  console.log(`\n🔧 Running single provider: ${provider}\n`);
+}
+
+if (forceArg) {
+  process.env.BILL_FORCE_FETCH = 'true';
+  console.log(`\n🔄 Force fetching fresh data (ignoring cache)\n`);
 }
 
 export async function main() {
   const providers = await loadProviders();
+  if (providers.length === 0) {
+    console.log('\nNo providers loaded. Add providers to BILL_PROVIDERS in .env\n');
+    return;
+  }
+  
   const aggregator = new Aggregator(providers);
   const bills = await aggregator.fetchAllBills();
   const dashboard = new UI(bills);
   dashboard.render();
+  
+  console.log('\n💾 Data cached in data/ directory');
 }
 
 // Export for use by other Clawdbot skills
