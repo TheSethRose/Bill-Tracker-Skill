@@ -154,14 +154,24 @@ export class ATTProvider {
     try {
       const cookiePath = this.getCookiePath();
       
-      // Get cookies from agent-browser
-      const cookiesJson = this.exec('cookies');
+      // Get cookies from agent-browser - it returns format like "name=value; name2=value2"
+      const cookiesRaw = this.exec('cookies');
       
-      // Parse and save with expiration
+      // Parse cookies from "name=value; name2=value2" format
+      const cookies: Array<{name: string; value: string}> = [];
+      const pairs = cookiesRaw.split(';').map(c => c.trim()).filter(c => c);
+      for (const pair of pairs) {
+        const [name, ...valueParts] = pair.split('=');
+        if (name && valueParts.length > 0) {
+          cookies.push({ name, value: valueParts.join('=') });
+        }
+      }
+
+      // Save with expiration
       const sessionData = {
         savedAt: Date.now(),
         expiresAt: Date.now() + (24 * 60 * 60 * 1000), // 24 hours
-        data: JSON.parse(cookiesJson),
+        data: cookies,
       };
 
       fs.writeFileSync(cookiePath, JSON.stringify(sessionData, null, 2));
