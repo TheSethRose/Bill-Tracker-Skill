@@ -4,7 +4,9 @@
  * Fetches bills from all configured providers and normalizes the data.
  */
 
-import { Bill, Provider, loadProviders } from './provider.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { Bill, Provider, BaseProvider } from './provider.js';
 
 export class Aggregator {
   constructor(private providers: Provider[]) {}
@@ -44,30 +46,34 @@ export class Aggregator {
     const today = new Date();
     return bills.filter((b) => b.dueDate >= today && b.dueDate <= soon);
   }
-
-  getTotalDue(): number {
-    // This would need bills passed in - using a different pattern
-    return 0;
-  }
 }
 
 /**
  * Load all configured providers from the providers directory
  */
 export async function loadProviders(): Promise<Provider[]> {
-  // Dynamic import of provider modules
-  // Each provider file should export a default class extending BaseProvider
   const providers: Provider[] = [];
   
   try {
-    const providerFiles = await this.getProviderFiles();
-    for (const file of providerFiles) {
+    const providerDir = path.join(process.cwd(), 'providers');
+    if (!fs.existsSync(providerDir)) return [];
+
+    const files = fs.readdirSync(providerDir).filter(
+      (f) => f.endsWith('.ts') || (f.endsWith('.js') && !f.endsWith('.d.ts'))
+    );
+
+    for (const file of files) {
+      // Skip template and JSON config files
+      if (file.startsWith('_') || file.endsWith('.json')) continue;
+
       try {
-        const module = await import(file);
+        const filePath = path.join(providerDir, file);
+        const module = await import(filePath);
         const ProviderClass = module.default || module.Provider;
-        if (ProviderClass) {
+        
+        if (ProviderClass && typeof ProviderClass === 'function') {
           const instance = new ProviderClass();
-          if (instance instanceof Provider || 'fetch' in instance) {
+          if (instance instanceof BaseProvider || 'fetch' in instance) {
             providers.push(instance);
           }
         }
@@ -75,22 +81,9 @@ export async function loadProviders(): Promise<Provider[]> {
         console.error(`Failed to load provider ${file}:`, error);
       }
     }
-  } catch {
-    // No providers configured yet
+  } catch (error) {
+    console.error('Error loading providers:', error);
   }
 
   return providers;
-}
-
-async function getProviderFiles(): Promise<string[]> {
-  const fs = await import('fs');
-  const path = await import('path');
-  
-  const providersDir = path.join(process.cwd(), 'providers');
-  if (!fs.existsSync(providersDir)) return [];
-  
-  const files = fs.readdirSync(providersDir);
-  return files
-    .filter((f) => f.endsWith('.js') || f.endsWith('.ts'))
-    .map((f) => path.join(providersDir, f));
 }
