@@ -1,0 +1,21 @@
+node_modules/
+.pnpm-store/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
