@@ -1,10 +1,8 @@
 /**
- * AT&T Provider using Agent-Browser
+ * AT&T Provider using Agent-Browser with Session Persistence
  * 
  * Supports both AT&T Wireless and AT&T Internet accounts.
- * Uses agent-browser CLI for reliable browser automation.
- * 
- * Session-based to avoid repeated logins and lockouts.
+ * Uses cookie-based sessions to avoid repeated logins and lockouts.
  * 
  * Credentials required in .env:
  * - ATT_USER=your-email@att.net
@@ -12,6 +10,8 @@
  */
 
 import { Bill, ProviderConfig, ProviderCategory } from '../provider.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class ATTProvider {
   name = 'AT&T';
@@ -23,11 +23,16 @@ export class ATTProvider {
   };
 
   private sessionName = 'att-bill-tracker';
+  private cookieDir = path.join(process.cwd(), 'sessions');
 
   async fetch(): Promise<Bill[]> {
-    const isLoggedIn = await this.checkSession();
+    // Ensure cookie directory exists
+    this.ensureCookieDir();
+
+    // Try to restore session from cookies first
+    const sessionRestored = await this.tryRestoreSession();
     
-    if (!isLoggedIn) {
+    if (!sessionRestored) {
       console.log('Logging into AT&T...');
       await this.login();
     } else {
@@ -42,11 +47,64 @@ export class ATTProvider {
     return [wireless, internet].filter((b): b is Bill => b !== null);
   }
 
-  private async checkSession(): Promise<boolean> {
+  private ensureCookieDir(): void {
+    if (!fs.existsSync(this.cookieDir)) {
+      fs.mkdirSync(this.cookieDir, { recursive: true });
+    }
+  }
+
+  private getCookiePath(): string {
+    return path.join(this.cookieDir, 'att-session.json');
+  }
+
+  private async tryRestoreSession(): Promise<boolean> {
     try {
+      const cookiePath = this.getCookiePath();
+      if (!fs.existsSync(cookiePath)) {
+        return false;
+      }
+
+      // Read saved cookies
+      const cookies = JSON.parse(fs.readFileSync(cookiePath, 'utf-8'));
+      
+      // Check if cookies are expired
+      const now = Date.now();
+      if (cookies.expiresAt && now > cookies.expiresAt) {
+        console.log('Session expired, need to login again');
+        return false;
+      }
+
+      // Close any existing session first
+      try {
+        this.exec('close');
+      } catch {
+        // Ignore
+      }
+
+      // Open the overview page directly
+      this.exec('open https://www.att.com/acctmgmt/overview');
+      this.wait(3000);
+
+      // Try to inject cookies
+      if (cookies.data && Array.isArray(cookies.data)) {
+        for (const cookie of cookies.data) {
+          try {
+            this.exec(`cookies set "${cookie.name}" "${cookie.value}"`);
+          } catch {
+            // Ignore individual cookie errors
+          }
+        }
+      }
+
+      // Navigate to overview page again
+      this.exec('open https://www.att.com/acctmgmt/overview');
+      this.wait(3000);
+
+      // Check if we're on the overview page (logged in)
       const url = this.exec('get url');
-      return url.includes('myatt') && !url.includes('signin.att.com');
-    } catch {
+      return url.includes('overview') || url.includes('myatt');
+    } catch (error) {
+      console.log('Failed to restore session:', error);
       return false;
     }
   }
@@ -55,7 +113,7 @@ export class ATTProvider {
     const username = process.env.ATT_USER || '';
     const password = process.env.ATT_PASS || '';
 
-    // Close any existing session first to start fresh
+    // Close any existing session first
     try {
       this.exec('close');
     } catch {
@@ -81,8 +139,36 @@ export class ATTProvider {
 
     // Click Sign In using the ID selector
     this.exec('click "#signin"');
-    // Wait for login to complete and redirect back
+    // Wait for login to complete
     this.wait(5000);
+
+    // Navigate to overview page
+    this.exec('open https://www.att.com/acctmgmt/overview');
+    this.wait(3000);
+
+    // Save session cookies
+    await this.saveSession();
+  }
+
+  private async saveSession(): Promise<void> {
+    try {
+      const cookiePath = this.getCookiePath();
+      
+      // Get cookies from agent-browser
+      const cookiesJson = this.exec('cookies');
+      
+      // Parse and save with expiration
+      const sessionData = {
+        savedAt: Date.now(),
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000), // 24 hours
+        data: JSON.parse(cookiesJson),
+      };
+
+      fs.writeFileSync(cookiePath, JSON.stringify(sessionData, null, 2));
+      console.log('Session saved to', cookiePath);
+    } catch (error) {
+      console.log('Failed to save session:', error);
+    }
   }
 
   private async fetchAccount(type: 'wireless' | 'internet', last4: string, testid: string): Promise<Bill | null> {
@@ -118,7 +204,6 @@ export class ATTProvider {
 
   private async extractBalance(): Promise<number> {
     try {
-      // Get the balance using JavaScript evaluation
       const balanceText = this.execEval(
         "document.querySelector('.type-60')?.textContent?.replace(/[^0-9.]/g, '') || '0'"
       );
@@ -131,7 +216,6 @@ export class ATTProvider {
 
   private async extractDueDate(): Promise<Date> {
     try {
-      // Look for due date using JavaScript
       const dueText = this.execEval(
         "document.body.innerText.match(/Due[:\\s]+([A-Za-z0-9,\\/\\s]+)/i)?.[1] || ''"
       );
@@ -144,7 +228,6 @@ export class ATTProvider {
       // Fall through
     }
 
-    // Default: 30 days from now
     return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   }
 
@@ -163,7 +246,6 @@ export class ATTProvider {
     const fullCmd = `agent-browser --session ${this.sessionName} ${command}`;
     try {
       const output = execSync(fullCmd, { encoding: 'utf-8', timeout: 30000 });
-      // Strip ANSI codes
       return output.replace(/\x1b\[[0-9;]*m/g, '').trim();
     } catch (error: any) {
       console.log(`Command failed: ${command}`);

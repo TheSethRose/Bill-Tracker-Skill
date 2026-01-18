@@ -9,6 +9,7 @@ npm-debug.log*
 .env
 .env.local
 .env.*.local
+sessions/
 
 # IDE
 .idea/
