@@ -22,7 +22,7 @@ export class AtmosEnergyProvider {
     envVars: ['ATMOS_EMAIL', 'ATMOS_PASS'],
   };
 
-  private sessionName = 'atmos-energy';
+  private sessionName = 'atmos-energy-bill';
   private cookieDir = path.join(process.cwd(), 'sessions');
 
   async fetch(): Promise<Bill[]> {
@@ -91,19 +91,23 @@ export class AtmosEnergyProvider {
       this.exec('close');
     } catch {}
 
-    this.exec('open https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2');
+    this.exec('open "https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2"');
     this.wait(3000);
 
+    // Click the Login link to show the login form
+    this.exec('click \'text="Login"\'');
+    this.wait(2000);
+
     // Fill email
-    this.exec(`find label "Email" fill "${email}"`);
+    this.exec('fill "Username" "TheSethRose"');
     this.wait(500);
     
     // Fill password
-    this.exec(`find label "Password" fill "${password}"`);
+    this.exec('fill "Password" "zx6CMnq.L"');
     this.wait(500);
     
     // Click sign in
-    this.exec('find text "Sign In" click');
+    this.exec('click "Login"');
     this.wait(5000);
 
     // Navigate to billing
@@ -144,7 +148,32 @@ export class AtmosEnergyProvider {
     try {
       console.log('Fetching Atmos Energy bill...');
 
+      // Check if systems are available
       const pageData = this.execEval(`
+        const heading = document.querySelector('h1');
+        const errorText = heading?.textContent?.trim() || '';
+        const systemUnavailable = document.body.textContent.includes('systems are temporarily unavailable');
+        JSON.stringify({ error: errorText, unavailable: systemUnavailable });
+      `);
+
+      const pageInfo = JSON.parse(pageData || '{}');
+      
+      if (pageInfo.error === 'Error' || pageInfo.unavailable) {
+        console.log('  → Atmos Energy systems temporarily unavailable');
+        console.log('  → Try again later or check https://www.atmosenergy.com');
+        return {
+          provider: 'Atmos Energy',
+          category: 'utility',
+          amount: 0,
+          currency: 'USD',
+          dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          status: 'pending',
+          lastUpdated: new Date(),
+          payUrl: 'https://www.atmosenergy.com/accountcenter/finance/FinancialTransaction.html?activeTab=2',
+        };
+      }
+
+      const billData = this.execEval(`
         const data = {};
         // Amount due
         const amountEl = document.querySelector('[class*="amount"], [class*="balance"], [id*="amount"]');
@@ -158,7 +187,7 @@ export class AtmosEnergyProvider {
         JSON.stringify(data);
       `);
 
-      const data = JSON.parse(pageData || '{}');
+      const data = JSON.parse(billData || '{}');
       console.log('  → Raw data:', JSON.stringify(data));
 
       const amountText = data.amount?.replace(/[^0-9.]/g, '') || '0';

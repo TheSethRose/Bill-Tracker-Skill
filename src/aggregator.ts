@@ -49,11 +49,20 @@ export class Aggregator {
 }
 
 /**
- * Load all configured providers from the providers directory
+ * Load configured providers from the providers directory
+ * Filter by BILL_PROVIDERS env var (comma-separated list)
+ * If BILL_PROVIDERS is empty or not set, run all available providers
  */
 export async function loadProviders(): Promise<Provider[]> {
   const providers: Provider[] = [];
   
+  // Get configured providers from env
+  const configured = (process.env.BILL_PROVIDERS || '').toLowerCase().split(',').map(p => p.trim()).filter(p => p);
+  
+  if (configured.length > 0) {
+    console.log(`\n📋 Configured providers: ${configured.join(', ')}`);
+  }
+
   try {
     const providerDir = path.join(process.cwd(), 'dist', 'providers');
     if (!fs.existsSync(providerDir)) return [];
@@ -66,6 +75,14 @@ export async function loadProviders(): Promise<Provider[]> {
       // Skip template and JSON config files
       if (file.startsWith('_') || file.endsWith('.json')) continue;
 
+      // Get provider name from filename (e.g., "att.js" -> "att")
+      const providerName = file.replace('.js', '').toLowerCase();
+
+      // Filter by configured providers if set
+      if (configured.length > 0 && !configured.includes(providerName)) {
+        continue;
+      }
+
       try {
         const filePath = path.join(providerDir, file);
         const module = await import(filePath);
@@ -75,6 +92,7 @@ export async function loadProviders(): Promise<Provider[]> {
           const instance = new ProviderClass();
           if (instance instanceof BaseProvider || 'fetch' in instance) {
             providers.push(instance);
+            console.log(`  ✓ ${instance.name}`);
           }
         }
       } catch (error) {
@@ -83,6 +101,10 @@ export async function loadProviders(): Promise<Provider[]> {
     }
   } catch (error) {
     console.error('Error loading providers:', error);
+  }
+
+  if (configured.length > 0 && providers.length === 0) {
+    console.log(`\n⚠️  No matching providers found. Check BILL_PROVIDERS in .env`);
   }
 
   return providers;
