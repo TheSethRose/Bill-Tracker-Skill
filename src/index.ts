@@ -7,6 +7,7 @@
  * @ clawd.bot - Thank you for making this possible!
  */
 
+import 'dotenv/config';
 import { Aggregator, loadProviders } from './aggregator.js';
 import { UI } from './ui.js';
 
