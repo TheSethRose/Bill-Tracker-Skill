@@ -1,153 +1,191 @@
 /**
- * AT&T Provider
+ * AT&T Provider using Agent-Browser
  * 
  * Supports both AT&T Wireless and AT&T Internet accounts.
- * Uses browser automation to handle the modern SPA interface.
+ * Uses agent-browser CLI for reliable browser automation.
+ * 
+ * Session-based to avoid repeated logins and lockouts.
  * 
  * Credentials required in .env:
- * - ATT_USER=your-username
+ * - ATT_USER=your-email@att.net
  * - ATT_PASS=your-password
  */
 
-import { BrowserProvider } from '../methods/browser.js';
-import { Bill } from '../provider.js';
+import { Bill, ProviderConfig } from '../provider.js';
 
-export class ATTProvider extends BrowserProvider {
-  constructor() {
-    super('AT&T', 'utility', {
-      loginUrl: 'https://www.att.com/myatt',
-      envVars: ['ATT_USER', 'ATT_PASS'],
-    });
-  }
+export interface ATTAccount {
+  type: 'wireless' | 'internet';
+  last4: string;
+  testid: string;
+}
+
+export class ATTProvider {
+  name = 'AT&T';
+  category = 'utility' as const;
+  method = 'browser' as const;
+  config: ProviderConfig = {
+    loginUrl: 'https://www.att.com/myatt',
+    envVars: ['ATT_USER', 'ATT_PASS'],
+  };
+
+  private sessionName = 'att-bill-tracker';
 
   async fetch(): Promise<Bill[]> {
-    // AT&T can have multiple accounts - fetch both
+    // Check if already logged in by checking session
+    const isLoggedIn = await this.checkSession();
+    
+    if (!isLoggedIn) {
+      await this.login();
+    }
+
+    // Fetch both accounts
     const [wireless, internet] = await Promise.all([
-      this.fetchWirelessBill(),
-      this.fetchInternetBill(),
+      this.fetchAccount('wireless', '177125913995', 'Wireless-177125913995'),
+      this.fetchAccount('internet', '337740445', 'Internet-337740445'),
     ]);
 
     return [wireless, internet].filter((b): b is Bill => b !== null);
   }
 
-  private async fetchWirelessBill(): Promise<Bill | null> {
-    if (!this.browser) throw new Error('Browser not initialized');
-
-    const page = await this.browser.newPage();
+  private async checkSession(): Promise<boolean> {
+    const { execSync } = await import('child_process');
     try {
-      await page.goto('https://www.att.com/myatt');
+      // Try to navigate to the dashboard and check for logged-in state
+      const result = execSync(
+        `agent-browser --session ${this.sessionName} open https://www.att.com/myatt && agent-browser --session ${this.sessionName} get url`,
+        { encoding: 'utf-8', timeout: 10000 }
+      );
       
-      // Check if we need to log in
-      const loginForm = page.locator('form[id="loginForm"], input[name="userID"]');
-      if (await loginForm.isVisible()) {
-        await this.login(page);
+      // If we're on the dashboard (not login page), we're logged in
+      return result.includes('myatt') && !result.includes('login');
+    } catch {
+      return false;
+    }
+  }
+
+  private async login(): Promise<void> {
+    const { execSync } = await import('child_process');
+    const username = process.env.ATT_USER || '';
+    const password = process.env.ATT_PASS || '';
+
+    const cmds = [
+      `agent-browser --session ${this.sessionName} open https://www.att.com/myatt`,
+      `agent-browser --session ${this.sessionName} wait --load networkidle`,
+      // Look for username field
+      `agent-browser --session ${this.sessionName} find label "User ID" fill "${username}"`,
+      `agent-browser --session ${this.sessionName} find label "Password" fill "${password}"`,
+      `agent-browser --session ${this.sessionName} find label "Sign In" click`,
+      `agent-browser --session ${this.sessionName} wait --load networkidle`,
+      `agent-browser --session ${this.sessionName} wait 2000`,
+    ];
+
+    for (const cmd of cmds) {
+      try {
+        execSync(cmd, { encoding: 'utf-8', timeout: 30000 });
+      } catch (error) {
+        console.log(`Command failed, continuing: ${cmd}`);
       }
+    }
 
-      // Wait for dashboard to load
-      await page.waitForLoadState('networkidle');
+    // Save session state
+    execSync(`agent-browser --session ${this.sessionName} cookies`, { encoding: 'utf-8' });
+  }
 
-      // Try to find wireless account section
-      // Look for account selector or wireless-specific elements
-      const accountCards = page.locator('[class*="account"], [class*="wireless"]');
-      const cardCount = await accountCards.count();
+  private async fetchAccount(type: 'wireless' | 'internet', last4: string, testid: string): Promise<Bill | null> {
+    const { execSync } = await import('child_process');
 
-      if (cardCount > 0) {
-        // Click first account (wireless typically first)
-        await accountCards.first().click();
-        await page.waitForTimeout(1000);
-      }
+    try {
+      // Click on the account to switch to it
+      execSync(
+        `agent-browser --session ${this.sessionName} find testid "${testid}" click`,
+        { encoding: 'utf-8', timeout: 15000 }
+      );
 
-      // Extract balance and due date
-      const balanceText = await page.locator('[class*="balance"], [class*="amount"], [data-testid*="balance"]').first().textContent();
-      const dueDateText = await page.locator('[class*="due"], [data-testid*="due"]').first().textContent();
+      // Wait for the account content to load
+      execSync(`agent-browser --session ${this.sessionName} wait 1500`, { encoding: 'utf-8' });
+
+      // Get balance - look for amount elements
+      const balanceResult = execSync(
+        `agent-browser --session ${this.sessionName} snapshot --json`,
+        { encoding: 'utf-8', timeout: 15000 }
+      );
+
+      // Parse balance from snapshot
+      const balance = this.extractBalance(balanceResult);
+
+      // Get due date
+      const dueDateResult = execSync(
+        `agent-browser --session ${this.sessionName} find text "Due" text`,
+        { encoding: 'utf-8', timeout: 10000 }
+      );
+
+      const dueDate = this.parseDueDate(dueDateResult);
 
       return {
-        provider: 'AT&T Wireless',
+        provider: `AT&T ${type.charAt(0).toUpperCase() + type.slice(1)}`,
         category: 'utility',
-        amount: this.parseCurrency(balanceText || '0'),
+        amount: balance,
         currency: 'USD',
-        dueDate: this.parseDate(dueDateText || new Date()),
-        status: this.determineStatus(this.parseDate(dueDateText || new Date())),
+        dueDate,
+        status: this.calculateStatus(dueDate),
         lastUpdated: new Date(),
-        accountLast4: await this.getAccountLast4(page),
+        accountLast4: last4,
       };
     } catch (error) {
-      console.error('Failed to fetch AT&T Wireless bill:', error);
+      console.error(`Failed to fetch AT&T ${type} bill:`, error);
       return null;
-    } finally {
-      await page.close();
     }
   }
 
-  private async fetchInternetBill(): Promise<Bill | null> {
-    if (!this.browser) throw new Error('Browser not initialized');
-
-    const page = await this.browser.newPage();
+  private extractBalance(snapshotJson: string): number {
     try {
-      await page.goto('https://www.att.com/myatt');
-      await page.waitForLoadState('networkidle');
-
-      // Look for internet account toggle/selector
-      // AT&T often has an account switcher dropdown
-      const accountSwitcher = page.locator('[class*="accountSwitcher"], select[id*="account"], button[class*="changeAccount"]');
-      
-      if (await accountSwitcher.isVisible()) {
-        // Would need to handle account selection
-        // This is a simplified version - real implementation needs account list
-        console.log('Account switcher found - implementation needed');
+      const snapshot = JSON.parse(snapshotJson);
+      // Look for elements containing currency patterns
+      const text = JSON.stringify(snapshot);
+      const matches = text.match(/\$[\d,]+\.?\d{0,2}/g);
+      if (matches && matches.length > 0) {
+        const cleaned = matches[0].replace(/[$,]/g, '');
+        return parseFloat(cleaned) || 0;
       }
-
-      return null; // Placeholder - needs account enumeration
-    } catch (error) {
-      console.error('Failed to fetch AT&T Internet bill:', error);
-      return null;
-    } finally {
-      await page.close();
+    } catch {
+      // Fallback parsing
     }
+    return 0;
   }
 
-  private async login(page: import('playwright').Page): Promise<void> {
-    const username = this.getEnv('ATT_USER');
-    const password = this.getEnv('ATT_PASS');
-
-    // AT&T login flow varies - try common selectors
-    const userInput = page.locator('input[name="userID"], input[id*="username"], input[type="email"]');
-    const passInput = page.locator('input[name="password"], input[id*="password"], input[type="password"]');
-    const submitBtn = page.locator('button[type="submit"], input[type="submit"], button[id*="login"]');
-
-    if (await userInput.isVisible()) {
-      await userInput.fill(username);
-    }
+  private parseDueDate(text: string): Date {
+    // Try to parse common date formats
+    const now = new Date();
     
-    if (await passInput.isVisible()) {
-      await passInput.fill(password);
+    // Look for "Due [date]" pattern
+    const dueMatch = text.match(/Due[:\s]+(.+)/i);
+    if (dueMatch) {
+      const parsed = new Date(dueMatch[1]);
+      if (!isNaN(parsed.getTime())) return parsed;
     }
 
-    if (await submitBtn.isVisible()) {
-      await submitBtn.click();
-    }
-
-    // Handle potential MFA
-    await this.handleMFA(page);
+    // Fallback: assume same day or next billing cycle
+    return new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   }
 
-  private async handleMFA(page: import('playwright').Page): Promise<void> {
-    // Check for MFA prompt
-    const mfaInput = page.locator('input[id*="mfa"], input[id*="code"], input[name*="verification"]');
+  private calculateStatus(dueDate: Date): Bill['status'] {
+    const today = new Date();
+    if (dueDate < today) return 'overdue';
     
-    if (await mfaInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      console.log('MFA required - please enter code manually or configure SMS/email bypass');
-      await mfaInput.waitFor({ timeout: 120000 }); // Wait 2 min for manual entry
-    }
+    const weekFromNow = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
+    if (dueDate <= weekFromNow) return 'due';
+    
+    return 'pending';
   }
 
-  private async getAccountLast4(page: import('playwright').Page): Promise<string | undefined> {
-    const last4Text = await page.locator('[class*="last4"], [class*="accountNumber"], [data-testid*="last4"]').first().textContent();
-    if (last4Text) {
-      const match = last4Text.match(/\d{4}/);
-      return match ? match[0] : undefined;
+  async close(): Promise<void> {
+    // Keep session open for reuse, but can close explicitly if needed
+    const { execSync } = await import('child_process');
+    try {
+      execSync(`agent-browser --session ${this.sessionName} close`, { encoding: 'utf-8' });
+    } catch {
+      // Ignore close errors
     }
-    return undefined;
   }
 }
 
