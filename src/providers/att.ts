@@ -183,22 +183,48 @@ export class ATTProvider {
 
   private async fetchAccount(type: 'wireless' | 'internet', last4: string, testid: string): Promise<Bill | null> {
     try {
-      console.log(`Fetching AT&T ${type} (****${last4})...`);
-
       // Click on the account to switch to it
       this.exec(`find testid "${testid}" click`);
       this.wait(2000);
 
-      // Get the balance
-      const balance = await this.extractBalance();
-      const dueDate = await this.extractDueDate();
+      // Extract all available data as text
+      const pageData = this.execEval(`
+        const data = {};
+        // Balance amount
+        const balanceEl = document.querySelector('.type-60');
+        if (balanceEl) data.balance = balanceEl.textContent.trim();
+        // Account number
+        const acctEl = document.querySelector('[class*="accountNumber"]');
+        if (acctEl) data.accountNumber = acctEl.textContent.trim();
+        // Due date
+        const dueEl = document.querySelector('[class*="due"], .type-15');
+        if (dueEl) data.dueDate = dueEl.textContent.trim();
+        // Min due
+        const minDueEl = document.querySelector('[class*="minDue"], [class*="minimum"]');
+        if (minDueEl) data.minDue = minDueEl.textContent.trim();
+        // Status text
+        const statusEl = document.querySelector('[class*="status"]');
+        if (statusEl) data.status = statusEl.textContent.trim();
+        JSON.stringify(data);
+      `);
 
-      console.log(`  → Balance: $${balance.toFixed(2)}, Due: ${dueDate.toLocaleDateString()}`);
+      const data = JSON.parse(pageData || '{}');
+
+      console.log(`\n=== AT&T ${type.toUpperCase()} ===`);
+      console.log(`Account: ****${last4}`);
+      console.log(`Balance: ${data.balance || 'N/A'}`);
+      console.log(`Due Date: ${data.dueDate || 'N/A'}`);
+      console.log(`Min Due: ${data.minDue || 'N/A'}`);
+      console.log(`Status: ${data.status || 'N/A'}`);
+
+      const balanceText = data.balance?.replace(/[^0-9.]/g, '') || '0';
+      const balance = parseFloat(balanceText);
+      const dueDate = this.parseDueDateText(data.dueDate);
 
       return {
         provider: `AT&T ${type.charAt(0).toUpperCase() + type.slice(1)}`,
         category: 'utility',
-        amount: balance,
+        amount: isNaN(balance) ? 0 : balance,
         currency: 'USD',
         dueDate,
         status: this.calculateStatus(dueDate),
@@ -210,6 +236,13 @@ export class ATTProvider {
       console.error(`Failed to fetch AT&T ${type}:`, error);
       return null;
     }
+  }
+
+  private parseDueDateText(text: string): Date {
+    if (!text) return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const parsed = new Date(text);
+    if (!isNaN(parsed.getTime())) return parsed;
+    return new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   }
 
   private async extractBalance(): Promise<number> {

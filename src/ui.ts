@@ -1,102 +1,42 @@
 /**
- * Dashboard UI
- * 
- * Formats and displays bill data in a clean table format.
+ * Dashboard UI - Simple text output
  */
 
 import { Bill, ProviderCategory } from './provider.js';
 import { format } from 'date-fns';
-import { table, TableUserConfig } from 'table';
 
 export class UI {
   constructor(private bills: Bill[]) {}
 
   render(): void {
     if (this.bills.length === 0) {
-      console.log('📭 No bills found. Add providers to get started!');
+      console.log('No bills found. Add providers to get started!');
       return;
     }
 
-    console.log(this.buildSummary());
-    console.log('\n' + this.buildTable());
-    console.log('\n' + this.buildLegend());
-  }
-
-  private buildSummary(): string {
+    // Calculate totals
     const totalDue = this.bills.reduce((sum, b) => {
       if (b.status !== 'paid') return sum + b.amount;
       return sum;
     }, 0);
 
-    const overdue = this.bills.filter((b) => b.status === 'overdue').length;
-    const dueSoon = this.bills.filter((b) => b.status === 'due').length;
-    const pending = this.bills.filter((b) => b.status === 'pending').length;
+    console.log(`\n=== BILL SUMMARY ===`);
+    console.log(`Total Due: $${totalDue.toFixed(2)}`);
+    console.log(`Bills: ${this.bills.length}\n`);
 
-    return `
-╔══════════════════════════════════════════════════════════╗
-║                    💸 BILL TRACKER                       ║
-╠══════════════════════════════════════════════════════════╣
-║  Total Due:     $${totalDue.toFixed(2).padStart(12)}                       ║
-║  Overdue:       ${overdue.toString().padStart(12)} ⚠️                       ║
-║  Due Soon:      ${dueSoon.toString().padStart(12)} 🔔                       ║
-║  Pending:       ${pending.toString().padStart(12)} 📅                       ║
-╚══════════════════════════════════════════════════════════╝`;
-  }
-
-  private buildTable(): string {
-    const header = ['Provider', 'Amount', 'Due Date', 'Status', 'Category'];
-    const rows = this.bills.map((bill) => [
-      bill.provider,
-      this.formatCurrency(bill.amount, bill.currency),
-      format(bill.dueDate, 'MMM dd'),
-      this.formatStatus(bill.status),
-      bill.category,
-    ]);
-
-    const config: TableUserConfig = {
-      columnDefault: { alignment: 'left' },
-      columns: {
-        1: { alignment: 'right' as const },
-        2: { alignment: 'center' as const },
-        3: { alignment: 'center' as const },
-      },
-      border: {
-        topBody: '─',
-        topJoin: '┬',
-        topLeft: '┌',
-        topRight: '┐',
-        bottomBody: '─',
-        bottomJoin: '┴',
-        bottomLeft: '└',
-        bottomRight: '┘',
-        bodyLeft: '│',
-        bodyRight: '│',
-        bodyJoin: '│',
-      },
-    };
-
-    return table([header, ...rows], config);
-  }
-
-  private formatCurrency(amount: number, currency: string): string {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency,
-    }).format(amount);
-  }
-
-  private formatStatus(status: Bill['status']): string {
-    const icons: Record<Bill['status'], string> = {
-      overdue: '🔴 OVERDUE',
-      due: '🟡 DUE SOON',
-      pending: '🟢 PENDING',
-      paid: '✅ PAID',
-    };
-    return icons[status];
-  }
-
-  private buildLegend(): string {
-    return `Legend: 🔴 Overdue (past due)  🟡 Due Soon (within 7 days)  🟢 Pending  ✅ Paid`;
+    // Output each bill as simple text
+    for (const bill of this.bills) {
+      console.log(`--- ${bill.provider} ---`);
+      console.log(`  Account: ****${bill.accountLast4 || 'N/A'}`);
+      console.log(`  Amount: $${bill.amount.toFixed(2)} ${bill.currency}`);
+      console.log(`  Due Date: ${format(bill.dueDate, 'MMM dd, yyyy')}`);
+      console.log(`  Status: ${bill.status}`);
+      console.log(`  Category: ${bill.category}`);
+      if (bill.payUrl) {
+        console.log(`  Pay URL: ${bill.payUrl}`);
+      }
+      console.log('');
+    }
   }
 
   exportToJSON(): string {
@@ -104,9 +44,9 @@ export class UI {
   }
 
   exportToCSV(): string {
-    const header = 'Provider,Amount,Currency,Due Date,Status,Category\n';
+    const header = 'Provider,Amount,Currency,Due Date,Status,Category,AccountLast4\n';
     const rows = this.bills.map((b) =>
-      `${b.provider},${b.amount},${b.currency},${b.dueDate.toISOString()},${b.status},${b.category}`
+      `${b.provider},${b.amount},${b.currency},${b.dueDate.toISOString()},${b.status},${b.category},${b.accountLast4 || ''}`
     ).join('\n');
     return header + rows;
   }
