@@ -7,6 +7,11 @@
  * Credentials required in .env:
  * - ATT_USER=your-email@att.net
  * - ATT_PASS=your-password
+ * 
+ * NOTE: AT&T has aggressive security that may limit concurrent sessions.
+ * If login fails with error 902, wait 1-2 hours before retrying.
+ * The session persistence helps avoid repeated logins but may still
+ * trigger blocks if attempted too frequently from the same IP.
  */
 
 import { Bill, ProviderConfig, ProviderCategory } from '../provider.js';
