@@ -5,15 +5,36 @@
 ## Usage
 
 ```bash
-# Run the bill tracker
-clawdbot bill-tracker status
+# Run configured providers (from BILL_PROVIDERS in .env)
+npm start
 
-# Show overdue bills
-clawdbot bill-tracker overdue
+# Run a single provider for testing
+npm start -- --provider=atmos
 
-# Export to JSON
-clawdbot bill-tracker export --json
+# Force refresh data (ignore cache)
+npm start -- --force
+
+# Run specific provider with fresh data
+npm start -- --provider=att --force
 ```
+
+## Configuration
+
+Set `BILL_PROVIDERS` in `.env` to specify which providers to run:
+
+```bash
+# Run only Atmos
+BILL_PROVIDERS=atmos
+
+# Run AT&T and Atmos
+BILL_PROVIDERS=att,atmos
+```
+
+## Data Caching
+
+- Data is cached in `data/` directory (gitignored)
+- Cached data is reused if less than 24 hours old
+- Use `--force` to bypass cache and fetch fresh data
 
 ## Overview
 
@@ -30,7 +51,7 @@ All data stays local. Credentials are accessed via `.env` only.
 1. **Fork and clone the provider repo:**
    https://github.com/TheSethRose/Bill-Tracker-Skill
 
-2. **Add your provider config** to the `providers/` directory following the template.
+2. **Add your provider** to `src/providers/` directory following existing patterns.
 
 3. **Configure credentials** in your `.env` file:
    ```
@@ -38,14 +59,16 @@ All data stays local. Credentials are accessed via `.env` only.
    PROVIDER_PASS=your-password
    ```
 
-4. **Submit a PR** to share your provider with the community!
+4. **Add provider name to BILL_PROVIDERS** in your `.env`
+
+5. **Submit a PR** to share your provider with the community!
 
 ## Want to Contribute?
 
 If you've built a provider for a bank, utility, or service:
 
 1. Fork the repo: https://github.com/TheSethRose/Bill-Tracker-Skill
-2. Add your provider file to `providers/`
+2. Add your provider file to `src/providers/`
 3. Update `.env.example` with required credentials
 4. Open a Pull Request
 
