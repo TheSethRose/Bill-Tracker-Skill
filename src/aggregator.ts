@@ -50,7 +50,7 @@ export class Aggregator {
 
 /**
  * Load configured providers from the providers directory
- * Filter by BILL_PROVIDERS env var (comma-separated list)
+ * Filter by BILL_PROVIDERS env var (comma-separated list) or --provider CLI arg
  * If BILL_PROVIDERS is empty or not set, run all available providers
  */
 export async function loadProviders(): Promise<Provider[]> {
@@ -60,7 +60,7 @@ export async function loadProviders(): Promise<Provider[]> {
   const configured = (process.env.BILL_PROVIDERS || '').toLowerCase().split(',').map(p => p.trim()).filter(p => p);
   
   if (configured.length > 0) {
-    console.log(`\n📋 Configured providers: ${configured.join(', ')}`);
+    console.log(`\n📋 Loading providers: ${configured.join(', ')}`);
   }
 
   try {
@@ -105,6 +105,7 @@ export async function loadProviders(): Promise<Provider[]> {
 
   if (configured.length > 0 && providers.length === 0) {
     console.log(`\n⚠️  No matching providers found. Check BILL_PROVIDERS in .env`);
+    console.log(`   Available: att, atmos`);
   }
 
   return providers;

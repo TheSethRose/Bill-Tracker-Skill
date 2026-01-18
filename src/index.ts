@@ -10,6 +10,17 @@
 import { Aggregator, loadProviders } from './aggregator.js';
 import { UI } from './ui.js';
 
+// Parse command line args
+const args = process.argv.slice(2);
+const providerArg = args.find(arg => arg.startsWith('--provider='));
+const specificProvider = providerArg ? providerArg.split('=')[1] : null;
+
+// Override BILL_PROVIDERS if --provider is specified
+if (specificProvider) {
+  process.env.BILL_PROVIDERS = specificProvider;
+  console.log(`\n🔧 Running single provider: ${specificProvider}\n`);
+}
+
 export async function main() {
   const providers = await loadProviders();
   const aggregator = new Aggregator(providers);
